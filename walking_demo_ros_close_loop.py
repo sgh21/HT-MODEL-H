@@ -3,16 +3,20 @@
 
 import numpy as np
 import sys
-sys.path.append('./walking_packet')
-from thmos_walk_engine import *
-from model_h_motors_control import *
-from random import random 
-from time import sleep
+import rospy
 import time
 import matplotlib.pyplot as plt
-import rospy
-from sensor_msgs.msg import Joy
-from geometry_msgs.msg import Twist
+
+from random import random 
+from time import sleep
+from sensor_msgs.msg import JointState
+sys.path.append('./walking_packet')
+from thmos_walk_engine_close_loop import *
+from model_h_motors_control import *
+from joy_control import Teleop
+
+
+
 if __name__ == '__main__':
   with open("walking_data.txt",'w') as f:
     f.write("\n")
@@ -40,7 +44,7 @@ if __name__ == '__main__':
   # # left leg
   # zero_list[9] = -0.25
   # zero_list[10] = 0.05
-  # zero_list[11] =-0.03param.txt
+  # zero_list[11] =-0.03
   # zero_list[12] =-0.08
   # zero_list[13] = 0.00
   # zero_list[14] = 0.00
@@ -51,6 +55,8 @@ if __name__ == '__main__':
   # zero_list[17] = 0.00
   
   # control box ----
+
+
   sys.path.append(sys.path[0] + '/param.txt')
   param_path=sys.path[-1]		
   param=np.genfromtxt(fname=param_path,dtype=float,delimiter=",",comments="#",max_rows=38,invalid_raise=False)
@@ -75,12 +81,17 @@ if __name__ == '__main__':
             'way_right' : [-1.0,1.0,-1.0,1.0,-1.0,-1.0],
             'leg_rod_length' : [0.15,0.16,0.0255,0.036,0.025,0.112,0.065]
             }
-  
+
   walk = walking(**Params)
   j = 0
   n = 0
   k = 0 
   nk = 0
+
+  rospy.init_node('thmos_zmp_walk', anonymous=True) 
+  joint_goal_publisher = rospy.Publisher('/walking_motor_goals', JointState, queue_size=1)
+  joint_goal_msg = JointState()
+  rate = rospy.Rate(50)
 
   record_com_x = []
   record_com_y = []
@@ -88,30 +99,23 @@ if __name__ == '__main__':
   record_R_foot_z = []
 
   with open("walking_data.txt",'a') as f:
-    for step in range(10000):
-      j += 1
-      if j >= 3:   
+    for step in range(1000):
+      j+=1
+      if j>=2:
         if n == 0:
-          walk.setGoalVel([-0.03, 0.0, 0.0])
-          # if nk < 8:
-          #   walk.setGoalVel([(random()-0.5)*0-0.01, (random()-0.5)*0.0, (random()-0.5)*0.0])
-          #   nk = nk + 1
-          # elif nk < 12:
-          #   walk.setGoalVel([(random()-0.5)*0.0, (random()-0.5)*0.0, (random()-0.5)*0.0])
-          #   nk = nk + 1
-          # else:
-          #   walk.setGoalVel([(random()-0.5)*0.0, (random()-0.5)*0.0, (random()-0.5)*0.0])
-          #   nk = 0
-        leg_r_ang,leg_l_ang,n = walk.getNextPos()
+          walk.setGoalVel([-0.01, 0.0, 0.0])
         j = 0
+        leg_ang,n = walk.getNextPos()
         record_com_x.append(walk.body_x)
         record_com_y.append(walk.body_y)
         record_L_foot_z.append(walk.left_up - walk.trunk_height)
         record_R_foot_z.append(walk.right_up - walk.trunk_height)
         # simulation / motor control ---
-        command_list = leg_l_ang +leg_r_ang  
-        ang_move = np.array(command_list)+ np.array(zero_list)
-
+        command_list = leg_ang  
+        ang_move = np.array(command_list)
+        joint_goal_msg.position = ang_move
+        joint_goal_publisher.publish(joint_goal_msg)  
+        rate.sleep()
 
         for i in range(len(ang_move)):
           f.write(str(ang_move[i]))
@@ -120,21 +124,21 @@ if __name__ == '__main__':
         # print(ang_move)
         # mctl.MotorSafeMove(ang_move.tolist())
 
-  # plt.figure("com state")
-  # plt.subplot(2,1,1)
-  # plt.plot(record_com_x,label="com x")
-  # plt.legend()
-  # plt.subplot(2,1,2)
-  # plt.plot(record_com_y,label="com y")
-  # plt.legend()
-  # plt.figure("foot state")
-  # plt.subplot(2,1,1)
-  # plt.plot(record_L_foot_z,label="L foot Z")
-  # plt.legend()
-  # plt.subplot(2,1,2)
-  # plt.plot(record_R_foot_z,label="R foot Z")
-  # plt.legend()
-  # plt.show()
+  plt.figure("com state")
+  plt.subplot(2,1,1)
+  plt.plot(record_com_x,label="com x")
+  plt.legend()
+  plt.subplot(2,1,2)
+  plt.plot(record_com_y,label="com y")
+  plt.legend()
+  plt.figure("foot state")
+  plt.subplot(2,1,1)
+  plt.plot(record_L_foot_z,label="L foot Z")
+  plt.legend()
+  plt.subplot(2,1,2)
+  plt.plot(record_R_foot_z,label="R foot Z")
+  plt.legend()
+  plt.show()
   
 
         # sleep(0.03)

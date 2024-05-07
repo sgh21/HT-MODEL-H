@@ -17,30 +17,31 @@ void leg_ik(double leg_lenth[], double end_pos[], double motor_way[], double st_
     */
     Eigen::Matrix3d R_t;
     R_t = Eigen::AngleAxisd(end_pos[5], Eigen::Vector3d::UnitZ()) * 
-          Eigen::AngleAxisd(end_pos[4], Eigen::Vector3d::UnitY()) * 
-          Eigen::AngleAxisd(end_pos[3], Eigen::Vector3d::UnitX());
+          Eigen::AngleAxisd(end_pos[4], Eigen::Vector3d::UnitY()) *  
+          Eigen::AngleAxisd(end_pos[3], Eigen::Vector3d::UnitX()); // 旋转矩阵
     
     Eigen::Vector3d d_t(end_pos[0], end_pos[1], end_pos[2]);
     
     //caculate self.theta 3 1 0 (HT_ID: 14 12 11)
-    Eigen::Matrix3d R_ti = R_t.transpose();
+    Eigen::Matrix3d R_ti = R_t.transpose();//inverse rotate
     Eigen::Vector3d d_3(0.0,0.0,leg_lenth[2]);
-    Eigen::Vector3d da = - R_ti * d_t - d_3;
-    double la = da.norm();
-        
+    Eigen::Vector3d da = - R_ti * d_t - d_3;// the 
+    double la = da.norm();//
     // 3
     double theta_a = 0;
     if(abs(leg_lenth[0] - leg_lenth[1]) > la){
         cout<<"error - too close"<<endl;
         st_leg_angle[3] = - PI; 
-        theta_a = PI;}
+        theta_a = PI;
+        throw "too close!!";}
     else if((leg_lenth[0] + leg_lenth[1]) > la){
         st_leg_angle[3] = acos( ( pow(leg_lenth[0],2)  + pow(leg_lenth[1],2) - pow(la,2) )  / (2 * leg_lenth[0] * leg_lenth[1]) )- PI;
         theta_a  = acos( (pow(leg_lenth[1],2)  + pow(la,2) - pow(leg_lenth[0],2) ) / (2 * leg_lenth[1] * la) );}
     else{
         cout<<"error - too far"<<endl;
         st_leg_angle[3] = 0.0;
-        theta_a = 0.0;}
+        theta_a = 0.0;
+        throw "too far!!";}
 
     // 1 - Y
     st_leg_angle[1] = theta_a + asin(da[0] / la);
@@ -78,15 +79,19 @@ void leg_ik(double leg_lenth[], double end_pos[], double motor_way[], double st_
     // parallel ankle caculate reference -> git@github.com:rocketman123456/ros2_ws.git
     double ty = st_leg_angle[1];
     double tx = st_leg_angle[0];
+
     double d =  leg_lenth[3];
     double L1 = leg_lenth[4];
     double h1 = leg_lenth[5];
     double h2 = leg_lenth[6]; 
+
     if (LorR){
     h1 = leg_lenth[6];
     h2 = leg_lenth[5];
     tx = -st_leg_angle[0];
     } 
+
+
     double cx = cos(tx);
     double sx = sin(tx);
     double cy = cos(ty);
@@ -109,12 +114,15 @@ void leg_ik(double leg_lenth[], double end_pos[], double motor_way[], double st_
         cout<<"error ankle"<<endl;
         st_leg_angle[1] = 0;
         st_leg_angle[0] = 0;
+        throw "ankle error!!";
     }
     else
     {
         st_leg_angle[1] = asin(CL / LenL) - asin(AL / LenL);
         st_leg_angle[0] = asin(CR / LenR) - asin(AR / LenR);
     }
+
+
     
     // parallel lap caculate
     st_leg_angle[3] = st_leg_angle[3] + st_leg_angle[2];

@@ -45,14 +45,24 @@ class thmos_spline():
     Returns:
      x - now motion    
     """
-    frame = round(frame_in)
+    frame = int(frame_in)
+    up_index = 1
+    down_index = self.N/2
+    fast_period = 0.6
     if(frame < 0):
       x = self.x_list[0]
     elif(frame >= self.N):
       x = self.x_list[self.N - 1]
     else:
       x = self.x_list[frame]
-    
+    # elif (frame<self.N*fast_period):
+    #   up_index = round(self.N/2*np.sin(frame/(self.N*fast_period)*3.14/2))
+    #   x = self.x_list[up_index]
+    # elif (frame>=self.N*fast_period and frame<self.N):
+    #   down_index = round(self.N/2-1 + self.N/2*np.sin((frame-self.N*fast_period)/(self.N*(1-fast_period))*3.14/2))
+    #   x = self.x_list[down_index]
+
+
     return x
 
 

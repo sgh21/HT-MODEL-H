@@ -18,7 +18,7 @@ import numpy as np
 import time
 import ctypes
 #lib = ctypes.CDLL('./MODEL_H_IK_BUILDER/build/libmodel_h_leg_ik.so')
-lib = ctypes.CDLL('/home/sunteng/HT-MODEL-H-master/walking_packet/MODEL_H_IK_BUILDER/build/libmodel_h_leg_ik.so')
+lib = ctypes.CDLL('./walking_packet/MODEL_H_IK_BUILDER/build/libmodel_h_leg_ik.so')
 # Define the function argument and return types
 lib.leg_ik.argtypes = [
     ctypes.c_double * 7, #length
@@ -31,7 +31,7 @@ lib.leg_ik.restype = None
 
 class ModelHLegIK:
     """inverse kinematics for two leg"""
-    def __init__(self, way_left = [1.0,-1.0,1.0,-1.0,-1.0,-1.0], way_right = [-1.0,1.0,-1.0,1.0,-1.0,-1.0],leg_rod_length = [0.15,0.16,0.0255,0.03215,0.022,0.112,0.065]):
+    def __init__(self, way_left = [1.0,-1.0,1.0,-1.0,-1.0,-1.0], way_right = [-1.0,1.0,-1.0,1.0,-1.0,-1.0],leg_rod_length = [0.15,0.16,0.0274,0.0354,0.022,0.112,0.065]):
         """
         initialize class
         """
@@ -71,7 +71,12 @@ class ModelHLegIK:
             lib.leg_ik(self.c_leg_len, self.c_end_pos, self.c_motor_way_r, self.c_leg_ang, self.c_left_or_right)
         theta = ctypes.cast(self.c_leg_ang_ptr, ctypes.POINTER(ctypes.c_double * 6)).contents
         for index in range(6):
-            self.leg_ang[index] = theta[index]
+            if index == 2: #and (LeftorRight == 'right' or LeftorRight == 'Right' ):
+                self.leg_ang[3] = theta[index]
+            elif index == 3: #and (LeftorRight == 'right' or LeftorRight == 'Right' ):
+                self.leg_ang[2] = theta[index]  
+            else:              
+                self.leg_ang[index] = theta[index]
         return self.leg_ang
         
                

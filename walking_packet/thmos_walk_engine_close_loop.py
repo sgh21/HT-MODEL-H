@@ -19,6 +19,7 @@ from model_h_kinematics import *
 from thmos_step_planner import *
 from thmos_preview_control import *
 from thmos_spline import *
+from yesense_imu_data_py import *
 
 """ WALKING STATE
 # start walking: double to single, zmp in middle to foot 
@@ -51,10 +52,11 @@ class walking():
     
     # init packet
     self.kinematic = ModelHLegIK(self.way_left, self.way_right, self.leg_rod_length)
-    self.spline_smooth = thmos_spline(0,self.foot_height,0,int(self.period_frames - self.start_up_frame))
+    self.spline_smooth = thmos_spline(0,self.foot_height,0,self.period_frames - self.start_up_frame)
     self.mpc_model = thmos_preview_control(self.dt, self.walking_period, self.com_height)
     self.step_plan = thmos_step_planner(self.max_vx, self.max_vy, self.max_vth, self.foot_width)
-    
+    self.imu = yesense_imu_Subscriber()
+
     # init status
     self.body_x = 0
     self.body_y = 0
@@ -75,6 +77,27 @@ class walking():
     self.left_off,  self.left_off_g,  self.left_off_d  = np.matrix([[0.0, 0.5*self.foot_width, 0.0]]),  np.matrix([[0.0, 0.0, 0.0]]),  np.matrix([[0.0, 0.0, 0.0]]) 
     self.right_off, self.right_off_g, self.right_off_d = np.matrix([[0.0, -0.5*self.foot_width, 0.0]]),  np.matrix([[0.0, 0.0, 0.0]]),  np.matrix([[0.0, 0.0, 0.0]])
     
+
+
+        # initialize feeedback params
+    self.fb_l_th_off = 0
+    self.fb_l_x_off = 0
+    self.fb_l_y_off = 0
+
+    self.fb_r_th_off = 0
+    self.fb_r_x_off = 0
+    self.fb_r_y_off = 0
+
+    # feedback parameters
+    self.feedback_rotation_coef = 1.13137 #0.8*sqrt(2)
+    self.feedback_coef = [0, 0, 0.003]
+    self.fb_y_limit_in = 0.014  # step point offset due to feedback at y axis limit inwards
+    self.fb_y_limit_out = 0.038 # step point offset due to feedback at y axis limit outwards
+    self.yaw_goal = self.imu.yaw
+    self.pitch_goal = 0.0
+    self.roll_goal = 0.0
+
+
     # pos_list - [(com)x, y, theta, (left)x, y, (right)x, y]
     self.pos_list  = [0,0,0, 0, 0.5*self.foot_width, 0, -0.5*self.foot_width]
     self.next_foot_step = [0,0,0, 0, 0.5*self.foot_width, 0, -0.5*self.foot_width]
@@ -124,9 +147,59 @@ class walking():
     self.body_x  = x[0,0]
     self.body_y  = y[0,0]
     self.body_th += self.body_th_d
+
+    self.frames_left = self.period_frames - self.now_frame
+
+    # initialize feedback params before start up
+    if self.now_frame <= 1:
+      self.fb_l_th_off_d = self.fb_l_th_off / self.period_frames
+      self.fb_l_x_off_d = self.fb_l_x_off / self.period_frames
+      self.fb_l_y_off_d = self.fb_l_y_off / self.period_frames
+
+      self.fb_r_th_off_d = self.fb_r_th_off / self.period_frames
+      self.fb_r_x_off_d = self.fb_r_x_off / self.period_frames
+      self.fb_r_y_off_d = self.fb_r_y_off / self.period_frames
+    elif self.now_frame < self.start_up_frame:
+      self.fb_l_th_off -= self.fb_l_th_off_d
+      self.fb_l_x_off -= self.fb_l_x_off_d
+      self.fb_l_y_off -= self.fb_l_y_off_d
+
+      self.fb_r_th_off -= self.fb_r_th_off_d
+      self.fb_r_x_off -= self.fb_r_x_off_d
+      self.fb_r_y_off -= self.fb_r_y_off_d
+
+    elif self.now_frame == self.start_up_frame:
+      self.yaw_goal = self.imu.yaw
+      self.pitch_goal = 0.0
+      self.roll_goal = 0.0
     
     # caculate foot move      
     if self.old_support_leg == 'LEFT' and self.walking_state != 'REST' and self.walking_state != 'BOOT':
+  # begin feedback calculation
+      # initialize feedback offset
+      if self.now_frame == self.start_up_frame:
+        self.fb_l_th_off = 0
+        self.fb_l_x_off = 0
+        self.fb_l_y_off = 0
+      self.fb_r_th_off -= self.fb_r_th_off_d
+      self.fb_r_x_off -= self.fb_r_x_off_d
+      self.fb_r_y_off -= self.fb_r_y_off_d
+      
+      # calculate imu feedback control offset
+      pitch_beta = self.feedback_rotation_coef * math.sqrt(self.trunk_height / 9.8)
+      pitch_preview = 0.5 * self.imu.pitch * math.cosh(pitch_beta *  self.frames_left * self.dt) + self.imu.wy * pitch_beta * math.sinh(pitch_beta *  self.frames_left * self.dt)
+      self.fb_l_x_off += self.feedback_coef[1] * (self.pitch_goal - pitch_preview)
+      roll_beta = self.feedback_rotation_coef * math.sqrt(self.trunk_height / 9.8)
+      roll_preview = 0.5 * (self.imu.roll - math.asin(0.5 * self.foot_width / self.trunk_height)) * math.cosh(roll_beta *  self.frames_left * self.dt) + self.imu.wx * pitch_beta * math.sinh(roll_beta *  self.frames_left * self.dt) + math.asin(0.5 * self.foot_width / self.trunk_height)
+      self.fb_l_y_off += self.feedback_coef[2] * (self.roll_goal - roll_preview)
+      if self.fb_l_y_off < -self.fb_y_limit_out:
+        self.fb_l_y_off = -self.fb_y_limit_out
+      elif self.fb_l_y_off > self.fb_y_limit_in:
+        self.fb_l_y_off = self.fb_y_limit_in
+
+      print("left step offset: ", self.fb_l_x_off, self.fb_l_y_off)
+  # end feedback calculation
+      
       if self.now_frame > self.start_up_frame:
         # x,y,theta
         self.left_off  += self.left_off_d
@@ -137,6 +210,30 @@ class walking():
           self.left_off = self.left_off_g
           self.left_up  = 0                       
     elif self.old_support_leg == 'RIGHT' and self.walking_state != 'REST' and self.walking_state != 'BOOT':
+  # begin feedback calculation
+      # initialize feedback offset
+      if self.now_frame == self.start_up_frame:
+        self.fb_r_th_off = 0
+        self.fb_r_x_off = 0
+        self.fb_r_y_off = 0
+      self.fb_l_th_off -= self.fb_l_th_off_d
+      self.fb_l_x_off -= self.fb_l_x_off_d
+      self.fb_l_y_off -= self.fb_l_y_off_d
+      # calculate imu feedback control offset
+      pitch_beta = self.feedback_rotation_coef * math.sqrt(self.trunk_height / 9.8)
+      pitch_preview = 0.5 * self.imu.pitch * math.cosh(pitch_beta *  self.frames_left * self.dt) + self.imu.wy * pitch_beta * math.sinh(pitch_beta *  self.frames_left * self.dt)
+      self.fb_r_x_off += self.feedback_coef[1] * (self.pitch_goal - pitch_preview)
+      roll_beta = self.feedback_rotation_coef * math.sqrt(self.trunk_height / 9.8)
+      roll_preview = 0.5 * (self.imu.roll + math.asin(0.5 * self.foot_width / self.trunk_height)) * math.cosh(roll_beta *  self.frames_left * self.dt) + self.imu.wx * pitch_beta * math.sinh(roll_beta *  self.frames_left * self.dt) - math.asin(0.5 * self.foot_width / self.trunk_height)
+      self.fb_r_y_off += self.feedback_coef[2] * (self.roll_goal - roll_preview)
+      if self.fb_r_y_off < -self.fb_y_limit_in:
+        self.fb_r_y_off = -self.fb_y_limit_in
+      elif self.fb_r_y_off > self.fb_y_limit_out:
+        self.fb_r_y_off = self.fb_y_limit_out
+
+      print("right step offset: ", self.fb_r_x_off, self.fb_r_y_off)
+    # end feedback calculation
+      
       if self.now_frame > self.start_up_frame:
         # x,y,theta
         self.right_off  += self.right_off_d
@@ -154,65 +251,23 @@ class walking():
     ro = self.right_off - np.block([[self.body_x, self.body_y, self.body_th]])
 
     # add com offset
-    left_foot  = [lo[0,0] + self.com_x_offset , lo[0,1] + self.com_y_offset + self.ex_foot_width, self.left_up -  self.trunk_height, 0.0, 0.1, lo[0,2]]
-    right_foot = [ro[0,0] + self.com_x_offset , ro[0,1] + self.com_y_offset - self.ex_foot_width, self.right_up - self.trunk_height, 0.0, 0.1, ro[0,2]]
-    
-    # print("left",left_foot)
-    # print("right",right_foot)
-    
+    left_foot  = [lo[0,0] + self.com_x_offset + self.fb_l_x_off , lo[0,1] + self.com_y_offset + self.fb_l_y_off + self.ex_foot_width, self.left_up -  self.trunk_height, 0.0, 0.0, lo[0,2]]
+    right_foot = [ro[0,0] + self.com_x_offset + self.fb_r_x_off , ro[0,1] + self.com_y_offset + self.fb_r_y_off - self.ex_foot_width, self.right_up - self.trunk_height, 0.0, 0.0, ro[0,2]]
+
     # ik caculate
     l_joint_angles = self.kinematic.LegIKMove('left',left_foot).copy()
     r_joint_angles = self.kinematic.LegIKMove('right',right_foot).copy()
-    
+
     # add trunk pitch
-    l_joint_angles[2] += self.trunk_pitch
-    l_joint_angles[3] -= self.trunk_pitch
-    r_joint_angles[2] -= self.trunk_pitch
-    r_joint_angles[3] += self.trunk_pitch
+    l_joint_angles[1] -= self.trunk_pitch
+    r_joint_angles[1] += self.trunk_pitch
+    self.joint_angles = l_joint_angles + r_joint_angles  # L angle first
     
     # loop
     self.now_frame += 1
 
-    return r_joint_angles, l_joint_angles, (self.period_frames - self.now_frame)
-  
-  def walking_state_machine(self):
-    """
-    Update the bot walking status.
-    """
-    if_vold_zero = (self.now_vel[0] == 0 and self.now_vel[1] == 0 and self.now_vel[2] == 0)
-    if_vnew_zero = (self.new_vel[0] == 0 and self.new_vel[1] == 0 and self.new_vel[2] == 0)
+    return self.joint_angles,  self.frames_left
     
-    if(if_vold_zero):
-      if(if_vnew_zero):        
-        self.walking_state = 'REST'
-      else:
-        self.walking_state = 'BOOT'
-    else:
-      if(if_vnew_zero):
-        self.walking_state = 'STOP'
-      else:     
-        self.walking_state = 'WALK'# add com offset
-    left_foot  = [lo[0,0] + self.com_x_offset , lo[0,1] + self.com_y_offset + self.ex_foot_width, self.left_up -  self.trunk_height, 0.0, 0.1, lo[0,2]]
-    right_foot = [ro[0,0] + self.com_x_offset , ro[0,1] + self.com_y_offset - self.ex_foot_width, self.right_up - self.trunk_height, 0.0, 0.1, ro[0,2]]
-    
-    # print("left",left_foot)
-    # print("right",right_foot)
-    
-    # ik caculate
-    l_joint_angles = self.kinematic.LegIKMove('left',left_foot).copy()
-    r_joint_angles = self.kinematic.LegIKMove('right',right_foot).copy()
-    
-    # add trunk pitch
-    l_joint_angles[2] += self.trunk_pitch
-    l_joint_angles[3] -= self.trunk_pitch
-    r_joint_angles[2] -= self.trunk_pitch
-    r_joint_angles[3] += self.trunk_pitch
-    
-    # loop
-    self.now_frame += 1
-
-    return r_joint_angles, l_joint_angles, (self.period_frames - self.now_frame)
-  
   def walking_state_machine(self):
     """
     Update the bot walking status.
@@ -238,8 +293,5 @@ class walking():
     return
 
     
-if __name__ == '__main__':
-    pass
-
 if __name__ == '__main__':
     pass

@@ -50,7 +50,7 @@ class thmos_preview_control():
     self.f = []
     self.xp, self.yp = np.matrix([[0.0],[0.0],[0.0]]), np.matrix([[0.0],[0.0],[0.0]])
     self.ux, self.uy = 0.0, 0.0
-    for i in range(0,round(period/dt)):
+    for i in range(0,int(period/dt)):
       self.f += [-np.linalg.inv(H+G.transpose()*P*G)*G.transpose()*np.linalg.matrix_power(xi.transpose(),i-1)*P*GR] # fi
     
   def CoM_motion(self, now_frame, current_x, current_y, zmp_plan, pre_reset = False):
@@ -72,8 +72,8 @@ class thmos_preview_control():
     dux, duy = self.F * X, self.F * Y
 
     # caculate Kd => new target feed forward
-    dux += self.f[round(self.period /self.dt) - now_frame] * (zmp_plan[1][0]-zmp_plan[0][0])
-    duy += self.f[round(self.period /self.dt) - now_frame] * (zmp_plan[1][1]-zmp_plan[0][1])
+    dux += self.f[int(self.period /self.dt) - now_frame] * (zmp_plan[1][0]-zmp_plan[0][0])
+    duy += self.f[int(self.period /self.dt) - now_frame] * (zmp_plan[1][1]-zmp_plan[0][1])
           
     self.ux, self.uy = self.ux + dux, self.uy + duy
 
